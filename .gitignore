@@ -6,6 +6,10 @@ target/
 # (keep Cargo.lock for binaries/apps)
 # Cargo.lock
 
+# Rust
+*.pdb
+*.rlib
+
 # IDEs/editors
 .vscode/
 .idea/
