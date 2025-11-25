@@ -1,39 +1,47 @@
-use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 
-use rand::Rng;
-
 fn main() {
-    println!("Guess the number!");
+    println!("Use: 'exit', 'show' or 'add <item> to <collection>");
 
-    let secret_number = rand::thread_rng().gen_range(1..=100);
-    println!("The secret number is: {secret_number}");
-    println!("Please input your guess.");
+    let mut collections: HashMap<String, HashSet<String>> = HashMap::new();
 
     loop {
-        let mut guess = String::new();
+        let mut command = String::new();
 
         io::stdin()
-            .read_line(&mut guess)
+            .read_line(&mut command)
             .expect("Failed to read line");
 
-        //println!("You guessed: {}", guess.trim());
+        let command = command.to_lowercase();
+        let mut command_parts = command.trim().split_whitespace();
+        if command_parts.clone().count() < 1 {
+            println!("Enter a command")
+        }
 
-        let guess: u32 = match guess.trim().parse() {
-            Ok(num) => num,
-            Err(_) => {
-                println!("Not a number");
-                continue;
+        match command_parts.next() {
+            Some("add") => {
+                let value = command_parts
+                    .next()
+                    .expect("Add command must have such format: 'add <item> to <collection>'");
+                command_parts.next();
+                let collection_name = command_parts
+                    .next()
+                    .expect("Add command must have such format: 'add <item> to <collection>'");
+                let collection = collections
+                    .entry(collection_name.to_string())
+                    .or_insert(HashSet::new());
+                collection.insert(value.to_string());
             }
-        };
-
-        match guess.cmp(&secret_number) {
-            Ordering::Less => println!("Too small!"),
-            Ordering::Greater => println!("Too big!"),
-            Ordering::Equal => {
-                println!("You win!");
+            Some("show") => {
+                println!("{collections:#?}");
+                println!("What's next?");
+            }
+            Some("exit") => {
                 break;
             }
+            _ => println!("Unknown command. Use: 'exit', 'show' or 'add <item> to <collection>'"),
         }
     }
 }
