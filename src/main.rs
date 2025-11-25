@@ -1,47 +1,80 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::io;
+use std::{
+    collections::{HashMap, HashSet},
+    io::{self, Write},
+};
+
+enum Command<'a> {
+    Add { item: &'a str, collection: &'a str },
+    Show,
+    Exit,
+    Empty,
+    Unknown,
+}
+
+fn parse_command(line: &str) -> Command<'_> {
+    let mut parts = line.trim().split_whitespace();
+    let Some(cmd) = parts.next() else {
+        return Command::Empty;
+    };
+
+    match cmd {
+        "add" => {
+            let Some(item) = parts.next() else {
+                return Command::Unknown;
+            };
+
+            // expect the word "to"
+            match parts.next() {
+                Some("to") => {}
+                _ => return Command::Unknown,
+            }
+
+            let Some(collection) = parts.next() else {
+                return Command::Unknown;
+            };
+
+            Command::Add { item, collection }
+        }
+        "show" => Command::Show,
+        "exit" => Command::Exit,
+        _ => Command::Unknown,
+    }
+}
 
 fn main() {
-    println!("Use: 'exit', 'show' or 'add <item> to <collection>");
+    println!("Use: 'exit', 'show' or 'add <item> to <collection>'");
 
     let mut collections: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut input = String::new();
 
     loop {
-        let mut command = String::new();
+        input.clear();
+        print!("> ");
+        io::stdout().flush().ok();
 
-        io::stdin()
-            .read_line(&mut command)
-            .expect("Failed to read line");
-
-        let command = command.to_lowercase();
-        let mut command_parts = command.trim().split_whitespace();
-        if command_parts.clone().count() < 1 {
-            println!("Enter a command")
+        if io::stdin().read_line(&mut input).is_err() {
+            eprintln!("Failed to read line");
+            continue;
         }
 
-        match command_parts.next() {
-            Some("add") => {
-                let value = command_parts
-                    .next()
-                    .expect("Add command must have such format: 'add <item> to <collection>'");
-                command_parts.next();
-                let collection_name = command_parts
-                    .next()
-                    .expect("Add command must have such format: 'add <item> to <collection>'");
-                let collection = collections
-                    .entry(collection_name.to_string())
-                    .or_insert(HashSet::new());
-                collection.insert(value.to_string());
+        let line = input.to_lowercase(); // you can remove this if you want case-sensitive items
+        match parse_command(&line) {
+            Command::Empty => {
+                println!("Enter a command");
             }
-            Some("show") => {
-                println!("{collections:#?}");
-                println!("What's next?");
+            Command::Add { item, collection } => {
+                let set = collections.entry(collection.to_owned()).or_default();
+                set.insert(item.to_owned());
             }
-            Some("exit") => {
-                break;
+            Command::Show => {
+                for (name, items) in &collections {
+                    println!("{name}: {items:?}");
+                }
             }
-            _ => println!("Unknown command. Use: 'exit', 'show' or 'add <item> to <collection>'"),
+            Command::Exit => break,
+            Command::Unknown => {
+                println!("Unknown command. Use: 'exit', 'show' or 'add <item> to <collection>'");
+            }
         }
     }
 }
