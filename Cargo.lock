@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "minigrep"
+name = "sergii_bondar_dummy_crate"
 version = "0.1.0"
