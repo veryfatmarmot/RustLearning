@@ -1,5 +1,7 @@
 [package]
 name = "sergii_bondar_dummy_crate"
+license = "MIT"
+description = "Nothing special, just learning rust."
 version = "0.1.0"
 edition = "2024"
 
