@@ -11,7 +11,10 @@ fn main() {
         let _main_scope = ScopeTimeLogger::new("Main");
 
         let slow = async {
-            trpl::sleep(Duration::from_millis(1000)).await;
+            for i in 0..10 {
+                trpl::sleep(Duration::from_millis(100)).await;
+                println!("{}ms passed", 100 * (i + 1));
+            }
             "I finished!"
         };
 
@@ -24,21 +27,10 @@ fn main() {
     });
 }
 
-
-async fn timeout<'a, F>(
-    future: F,
-    timeout_dur: Duration,
-) -> Result<&'a str, Duration> 
-where
-    F: Future<Output = &'a str>,
+async fn timeout<F: Future>(future: F, timeout_dur: Duration) -> Result<F::Output, Duration>
 {
-    let timeout_future = async {
-        trpl::sleep(timeout_dur).await;
-        timeout_dur
-    };
-
-    match trpl::race(future, timeout_future).await {
+    match trpl::race(future, trpl::sleep(timeout_dur)).await {
         Either::Left(res) => Ok(res),
-        Either::Right(res) => Err(res),
+        Either::Right(_) => Err(timeout_dur),
     }
 }
