@@ -46,6 +46,13 @@ impl Post {
         }
     }
 
+    fn reject(&mut self) {
+        if let Post::PendingReview(state_obj) = self {
+            let content = std::mem::take(&mut state_obj.content);
+            *self = Post::Draft(PostDraft { content });
+        }
+    }
+
     fn content(&self) -> &str {
         match self {
             Post::Published(published) => published.content(),
