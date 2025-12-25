@@ -1,65 +1,22 @@
 fn main() {
     let mut post = Post::new();
-
     post.add_text("I ate a salad for lunch today");
-    post.add_text(" and some pickles.");
-    post.approve();
-    assert_eq!("", post.content());
+    post.add_text(" and some pickles.");    
+    let post = post.request_review();
 
-    post.request_review();
-    assert_eq!("", post.content());
+    let mut post = post.reject();    
+    post.add_text(" And drunk some woter.");    
+    let post = post.request_review();
 
-    post.approve();
+    let post = post.approve();
+
     println!("{}", post.content());
 }
 
+
 // ==========================================================================================================
 
-enum Post {
-    Draft(PostDraft),
-    PendingReview(PostPendingReview),
-    Published(PostPublished),
-}
-
-impl Post {
-    fn new() -> Post {
-        Post::Draft(PostDraft::new())
-    }
-
-    fn add_text(&mut self, text: &str) {
-        if let Post::Draft(draft) = self {
-            draft.add_text(text);
-        }
-    }
-
-    fn request_review(&mut self) {
-        if let Post::Draft(state_obj) = self {
-            let content = std::mem::take(&mut state_obj.content);
-            *self = Post::PendingReview(PostPendingReview::new(content));
-        }
-    }
-
-    fn approve(&mut self) {
-        if let Post::PendingReview(state_obj) = self {
-            let content = std::mem::take(&mut state_obj.content);
-            *self = Post::Published(PostPublished::new(content));
-        }
-    }
-
-    fn reject(&mut self) {
-        if let Post::PendingReview(state_obj) = self {
-            let content = std::mem::take(&mut state_obj.content);
-            *self = Post::Draft(PostDraft { content });
-        }
-    }
-
-    fn content(&self) -> &str {
-        match self {
-            Post::Published(published) => published.content(),
-            _ => "",
-        }
-    }
-}
+type Post = PostDraft;
 
 // ==========================================================================================================
 
@@ -77,6 +34,12 @@ impl PostDraft {
     fn add_text(&mut self, text: &str) {
         self.content.push_str(text);
     }
+
+    fn request_review(self) -> PostPendingReview {
+        PostPendingReview {
+            content: self.content,
+        }
+    }
 }
 
 // ==========================================================================================================
@@ -86,22 +49,27 @@ struct PostPendingReview {
 }
 
 impl PostPendingReview {
-    fn new(content: String) -> PostPendingReview {
-        PostPendingReview { content: content }
+    fn approve(self) -> PostPublished {
+        PostPublished {
+            content: self.content,
+        }
+    }
+
+    fn reject(self) -> PostDraft {
+        PostDraft {
+            content: self.content,
+        }
     }
 }
 
 // ==========================================================================================================
 
+//#[derive(Debug)]
 struct PostPublished {
     content: String,
 }
 
 impl PostPublished {
-    fn new(content: String) -> PostPublished {
-        PostPublished { content: content }
-    }
-
     fn content(&self) -> &str {
         &self.content
     }
