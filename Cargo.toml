@@ -8,3 +8,7 @@ edition = "2024"
 [dependencies]
 trpl = "0.3.0"
 futures = "0.3"
+hello_macro = { path = "hello_macro" }
+hello_macro_derive = { path = "hello_macro/hello_macro_derive" }
+
+
