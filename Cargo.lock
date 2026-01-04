@@ -299,18 +299,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hello_macro"
-version = "0.1.0"
-
-[[package]]
-name = "hello_macro_derive"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
 name = "html5ever"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1149,8 +1137,6 @@ name = "sergii_bondar_dummy_crate"
 version = "0.1.0"
 dependencies = [
  "futures",
- "hello_macro",
- "hello_macro_derive",
  "trpl",
 ]
 
