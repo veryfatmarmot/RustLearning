@@ -80,8 +80,21 @@ fn handle_connection(stream: TcpStream) -> Result<()> {
 
 /// Returns a 404 Not Found response.
 fn get_404_response() -> Result<Vec<u8>> {
-    let response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n404 Not Found";
-    Ok(response.as_bytes().to_vec())
+    let path = Path::new("resources/404.html");
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read file {}: {}", path.display(), e);
+            return Ok("HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/plain\r\n\r\n404 Not Found".as_bytes().to_vec());
+        }
+    };
+    
+    let length = contents.len();
+    let response = format!(
+        "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        length, contents
+    );
+    Ok(response.into_bytes())    
 }
 
 /// Returns the main page response by reading hello.html.
