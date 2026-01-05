@@ -1,92 +1,123 @@
-use std::error::Error;
-use std::fs;
-use std::io::{BufReader, Error as IoError, prelude::*};
-use std::net::{TcpListener, TcpStream};
+use anyhow::{Context, Result, anyhow, ensure};
+use std::{
+    fs,
+    io::{BufReader, prelude::*},
+    net::{TcpListener, TcpStream},
+    path::Path,
+};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:7879")?;
+fn main() -> Result<()> {
+    const ADDR: &str = "127.0.0.1:7877";
+    let listener = TcpListener::bind(ADDR).context("Failed to bind to address")?;
+    println!("Server listening on http://{ADDR}");
 
     for stream in listener.incoming() {
-        let stream = stream?;
+        let stream = stream.context("Failed to accept connection")?;
 
-        handle_connection(stream)?;
+        if let Err(e) = handle_connection(stream) {
+            eprintln!("Connection error: {e}");
+        }
     }
 
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
+/// Handles a single TCP connection: reads the request, parses it, and sends a response.
+fn handle_connection(stream: TcpStream) -> Result<()> {
     let buf_reader = BufReader::new(&stream);
-    let http_request: Vec<_> = buf_reader
+
+    // Read request lines, handling I/O errors properly
+    let http_request: Vec<String> = buf_reader
         .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
+        .take_while(|line| match line {
+            Ok(l) => !l.is_empty(),
+            Err(_) => false, // Stop on error
+        })
+        .collect::<Result<_, _>>()
+        .context("Failed to read request lines")?;
 
-    println!("Request: {http_request:#?}");
+    println!("Request: {http_request:#?}/n/n");
 
-    if http_request.len() < 1 {
-        return Err(Box::new(IoError::new(
-            std::io::ErrorKind::InvalidData,
-            "Invalid HTTP request",
-        )));
-    }
+    // Ensure we have at least the first line
+    ensure!(!http_request.is_empty(), "Invalid HTTP request: no headers");
 
-    let mut http_request_parts_it = http_request[0].split_whitespace();
-    let http_method = http_request_parts_it
+    // Parse the first line (e.g., "GET / HTTP/1.1")
+    let mut header_first_line_parts = http_request[0].split_whitespace();
+    let http_method = header_first_line_parts
         .next()
-        .expect("Invalid first header line. Need METHOD");
-    let uri = http_request_parts_it
+        .ok_or_else(|| anyhow!("Invalid first header line: missing METHOD"))?;
+    let uri = header_first_line_parts
         .next()
-        .expect("Invalid first header line. Need URI");
+        .ok_or_else(|| anyhow!("Invalid first header line: missing URI"))?;
 
-    if http_method != "GET" {
-        return Err(Box::new(IoError::new(
-            std::io::ErrorKind::InvalidData,
-            "Only GET method is supported",
-        )));
-    }
+    // Basic validation
+    ensure!(http_method == "GET", "Only GET method is supported");
+    ensure!(uri.starts_with('/'), "Invalid URI: must start with '/'");
 
-    let response: Vec<u8> = match uri {
+    // Route to response based on URI
+    let response = match uri {
         "/" => get_page_response(),
         "/favicon.ico" => get_favicon_response(),
         _ => get_404_response(),
     }?;
 
+    // Print response for debugging
     if let Ok(str) = std::str::from_utf8(&response) {
         println!("Response: {str}");
     } else {
         println!("Response: [binary data]");
     }
 
-    stream.write_all(&response)?;
+    // Return the response
+    let mut stream = stream; // Reborrow as mutable for writing
+    stream
+        .write_all(&response)
+        .context("Failed to write response")?;
+    stream.flush().context("Failed to flush response")?;
 
     Ok(())
 }
 
-fn get_404_response() -> Result<Vec<u8>, Box<dyn Error>> {
-    Ok("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes().to_vec())
+/// Returns a 404 Not Found response.
+fn get_404_response() -> Result<Vec<u8>> {
+    let response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n404 Not Found";
+    Ok(response.as_bytes().to_vec())
 }
 
-fn get_page_response() -> Result<Vec<u8>, Box<dyn Error>> {
-    let status_line = "HTTP/1.1 200 OK";
-    let contents = fs::read_to_string("resources/hello.html")?;
+/// Returns the main page response by reading hello.html.
+fn get_page_response() -> Result<Vec<u8>> {
+    let path = Path::new("resources/hello.html");
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read file {}: {}", path.display(), e);
+            return get_404_response();
+        }
+    };
     let length = contents.len();
-
-    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        length, contents
+    );
     Ok(response.into_bytes())
 }
 
-fn get_favicon_response() -> Result<Vec<u8>, Box<dyn Error>> {
-    let status_line = "HTTP/1.1 200 OK";
-    let contents = fs::read("resources/favicon.ico")?;
+/// Returns the favicon response by reading favicon.ico.
+fn get_favicon_response() -> Result<Vec<u8>> {
+    let path = Path::new("resources/favicon.ico");
+    let contents = match fs::read(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read file {}: {}", path.display(), e);
+            return get_404_response();
+        }
+    };
     let length = contents.len();
-
-    let header = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n");
-
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: image/x-icon\r\nContent-Length: {}\r\n\r\n",
+        length
+    );
     let mut response = header.into_bytes();
     response.extend(contents);
-
     Ok(response)
 }
