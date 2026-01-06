@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use lazy_static::lazy_static;
 use std::{
+    boxed::Box,
     collections::HashMap,
     fs,
     io::{BufReader, prelude::*},
@@ -26,26 +27,33 @@ fn main() -> Result<()> {
 }
 
 type Response = Vec<u8>;
-type ResponseResult = Result<Response>;
+
+trait HttpRequestHandler {
+    fn handle(&self) -> Result<Response>;
+}
+
+type HttpRequestHandlerBoxed = Box<dyn HttpRequestHandler + Send + Sync>;
 
 lazy_static! {
-    static ref ROUTE_MAP: HashMap<&'static str, fn() -> ResponseResult> = {
-        let mut map = HashMap::new();
-        map.insert("/", get_page_response as fn() -> ResponseResult);
-        map.insert("/favicon.ico", get_favicon_response as fn() -> ResponseResult);
+    static ref NOT_FOUND_HANDLER: HttpRequestHandlerBoxed = Box::new(HttpRequestHandlerNotFound);
+    static ref HTTP_REQUEST_HANDLERS: HashMap<&'static str, HttpRequestHandlerBoxed> = {
+        let mut map: HashMap<&'static str, HttpRequestHandlerBoxed> = HashMap::new();
+        map.insert("/", Box::new(HttpRequestHandlerRoot));
+        map.insert("/favicon.ico", Box::new(HttpRequestHandlerFavicon));
         map
     };
 }
 
 /// Handles a single TCP connection: reads the request, parses it, and sends a response.
-fn handle_connection(stream: TcpStream) -> Result<()> {
+fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let uri = get_uri(&stream)?;
 
     // Route to response based on URI
-    let handler = ROUTE_MAP
+    let handler = HTTP_REQUEST_HANDLERS
         .get(uri.as_str())
-        .unwrap_or(&(get_404_response as fn() -> ResponseResult));
-    let response = handler()?;
+        .map(|b| b.as_ref())
+        .unwrap_or(NOT_FOUND_HANDLER.as_ref());
+    let response = handler.handle()?;
 
     // Print response for debugging
     if let Ok(str) = std::str::from_utf8(&response) {
@@ -55,7 +63,6 @@ fn handle_connection(stream: TcpStream) -> Result<()> {
     }
 
     // Return the response
-    let mut stream = stream; // Reborrow as mutable for writing
     stream
         .write_all(&response)
         .context("Failed to write response")?;
@@ -100,62 +107,71 @@ fn get_uri(stream: &TcpStream) -> Result<String> {
 }
 
 /// Returns a 404 Not Found response.
-fn get_404_response() -> ResponseResult {
-    let path = Path::new("resources/404.html");
-    let contents = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read file {}: {}", path.display(), e);
-            return Ok(
-                "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/plain\r\n\r\n404 Not Found"
-                    .as_bytes()
-                    .to_vec(),
-            );
-        }
-    };
+struct HttpRequestHandlerNotFound;
+impl HttpRequestHandler for HttpRequestHandlerNotFound {
+    fn handle(&self) -> Result<Response> {
+        let path = Path::new("resources/404.html");
+        let contents = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path.display(), e);
+                return Ok(
+                    "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/plain\r\n\r\n404 Not Found"
+                        .as_bytes()
+                        .to_vec(),
+                );
+            }
+        };
 
-    let length = contents.len();
-    let response = format!(
-        "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-        length, contents
-    );
-    Ok(response.into_bytes())
+        let length = contents.len();
+        let response = format!(
+            "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+            length, contents
+        );
+        Ok(response.into_bytes())
+    }
 }
 
-/// Returns the main page response by reading hello.html.
-fn get_page_response() -> ResponseResult {
-    let path = Path::new("resources/hello.html");
-    let contents = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read file {}: {}", path.display(), e);
-            return get_404_response();
-        }
-    };
-    let length = contents.len();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-        length, contents
-    );
-    Ok(response.into_bytes())
+/// Returns the main page response
+struct HttpRequestHandlerRoot;
+impl HttpRequestHandler for HttpRequestHandlerRoot {
+    fn handle(&self) -> Result<Response> {
+        let path = Path::new("resources/hello.html");
+        let contents = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path.display(), e);
+                return NOT_FOUND_HANDLER.as_ref().handle();
+            }
+        };
+        let length = contents.len();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+            length, contents
+        );
+        Ok(response.into_bytes())
+    }
 }
 
 /// Returns the favicon response by reading favicon.ico.
-fn get_favicon_response() -> ResponseResult {
-    let path = Path::new("resources/favicon.ico");
-    let contents = match fs::read(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read file {}: {}", path.display(), e);
-            return get_404_response();
-        }
-    };
-    let length = contents.len();
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: image/x-icon\r\nContent-Length: {}\r\n\r\n",
-        length
-    );
-    let mut response = header.into_bytes();
-    response.extend(contents);
-    Ok(response)
+struct HttpRequestHandlerFavicon;
+impl HttpRequestHandler for HttpRequestHandlerFavicon {
+    fn handle(&self) -> Result<Response> {
+        let path = Path::new("resources/favicon.ico");
+        let contents = match fs::read(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path.display(), e);
+                return NOT_FOUND_HANDLER.as_ref().handle();
+            }
+        };
+        let length = contents.len();
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/x-icon\r\nContent-Length: {}\r\n\r\n",
+            length
+        );
+        let mut response = header.into_bytes();
+        response.extend(contents);
+        Ok(response)
+    }
 }
