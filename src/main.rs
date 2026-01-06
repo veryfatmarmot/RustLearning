@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, ensure};
+use lazy_static::lazy_static;
 use std::{
+    collections::HashMap,
     fs,
     io::{BufReader, prelude::*},
     net::{TcpListener, TcpStream},
@@ -23,16 +25,27 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+type Response = Vec<u8>;
+type ResponseResult = Result<Response>;
+
+lazy_static! {
+    static ref ROUTE_MAP: HashMap<&'static str, fn() -> ResponseResult> = {
+        let mut map = HashMap::new();
+        map.insert("/", get_page_response as fn() -> ResponseResult);
+        map.insert("/favicon.ico", get_favicon_response as fn() -> ResponseResult);
+        map
+    };
+}
+
 /// Handles a single TCP connection: reads the request, parses it, and sends a response.
 fn handle_connection(stream: TcpStream) -> Result<()> {
     let uri = get_uri(&stream)?;
 
     // Route to response based on URI
-    let response = match &uri as &str {
-        "/" => get_page_response(),
-        "/favicon.ico" => get_favicon_response(),
-        _ => get_404_response(),
-    }?;
+    let handler = ROUTE_MAP
+        .get(uri.as_str())
+        .unwrap_or(&(get_404_response as fn() -> ResponseResult));
+    let response = handler()?;
 
     // Print response for debugging
     if let Ok(str) = std::str::from_utf8(&response) {
@@ -87,7 +100,7 @@ fn get_uri(stream: &TcpStream) -> Result<String> {
 }
 
 /// Returns a 404 Not Found response.
-fn get_404_response() -> Result<Vec<u8>> {
+fn get_404_response() -> ResponseResult {
     let path = Path::new("resources/404.html");
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -110,7 +123,7 @@ fn get_404_response() -> Result<Vec<u8>> {
 }
 
 /// Returns the main page response by reading hello.html.
-fn get_page_response() -> Result<Vec<u8>> {
+fn get_page_response() -> ResponseResult {
     let path = Path::new("resources/hello.html");
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -128,7 +141,7 @@ fn get_page_response() -> Result<Vec<u8>> {
 }
 
 /// Returns the favicon response by reading favicon.ico.
-fn get_favicon_response() -> Result<Vec<u8>> {
+fn get_favicon_response() -> ResponseResult {
     let path = Path::new("resources/favicon.ico");
     let contents = match fs::read(path) {
         Ok(c) => c,
