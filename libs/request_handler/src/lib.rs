@@ -12,14 +12,15 @@ pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
 
     // Route to response based on URI
     let handler = http_request_handlers::HANDLES
-        .get(uri.as_str())
-        .map(|b| b.as_ref())
+        .iter()
+        .find(|(re, _)| re.is_match(uri.as_str()))
+        .map(|(_, h)| h.as_ref())
         .unwrap_or(http_request_handlers::NOT_FOUND_HANDLER.as_ref());
     let response = handler.handle()?;
 
     // Print response for debugging
-    if let Ok(str) = std::str::from_utf8(&response) {
-        println!("Response: {str}");
+    if let Ok(_) = std::str::from_utf8(&response) {
+        println!("Response: [string data]");
     } else {
         println!("Response: [binary data]");
     }

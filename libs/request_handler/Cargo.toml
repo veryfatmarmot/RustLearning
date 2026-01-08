@@ -8,3 +8,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 lazy_static = "1.4"
+regex = "1.10"
+utils = { path = "../utils" }
