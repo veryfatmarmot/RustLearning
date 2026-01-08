@@ -8,21 +8,21 @@ pub trait Handler {
     fn handle(&self) -> Result<Response>;
 }
 
-type HandlerBoxed = Box<dyn Handler + Send + Sync>;
+type BoxedHandler = Box<dyn Handler + Send + Sync>;
 
 lazy_static! {
-    pub static ref NOT_FOUND_HANDLER: HandlerBoxed = Box::new(NotFoundHandler);
-    pub static ref HANDLES: HashMap<&'static str, HandlerBoxed> = {
-        let mut map: HashMap<&'static str, HandlerBoxed> = HashMap::new();
-        map.insert("/", Box::new(HomeHandler));
-        map.insert("/favicon.ico", Box::new(FaviconHandler));
+    pub static ref NOT_FOUND_HANDLER: BoxedHandler = Box::new(HandlerNotFound);
+    pub static ref HANDLES: HashMap<&'static str, BoxedHandler> = {
+        let mut map: HashMap<&'static str, BoxedHandler> = HashMap::new();
+        map.insert("/", Box::new(HandlerHome));
+        map.insert("/favicon.ico", Box::new(HandlerFavicon));
         map
     };
 }
 
 /// Returns a 404 Not Found response.
-struct NotFoundHandler;
-impl Handler for NotFoundHandler {
+struct HandlerNotFound;
+impl Handler for HandlerNotFound {
     fn handle(&self) -> Result<Response> {
         let path = Path::new("resources/404.html");
         let contents = match fs::read_to_string(path) {
@@ -47,8 +47,8 @@ impl Handler for NotFoundHandler {
 }
 
 /// Returns the main page response
-struct HomeHandler;
-impl Handler for HomeHandler {
+struct HandlerHome;
+impl Handler for HandlerHome {
     fn handle(&self) -> Result<Response> {
         let path = Path::new("resources/hello.html");
         let contents = match fs::read_to_string(path) {
@@ -68,8 +68,8 @@ impl Handler for HomeHandler {
 }
 
 /// Returns the favicon response by reading favicon.ico.
-struct FaviconHandler;
-impl Handler for FaviconHandler {
+struct HandlerFavicon;
+impl Handler for HandlerFavicon {
     fn handle(&self) -> Result<Response> {
         let path = Path::new("resources/favicon.ico");
         let contents = match fs::read(path) {
