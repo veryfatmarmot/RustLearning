@@ -1,14 +1,15 @@
+[workspace]
+members = ["libs/request_handler", "libs/utils"]
+
 [package]
-name = "sergii_bondar_dummy_crate"
+name = "simple_http_server"
 license = "MIT"
 description = "Nothing special, just learning rust."
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-trpl = "0.3.0"
-futures = "0.3"
 anyhow = "1.0.100"
-lazy_static = "1.4"
-
+request_handler = { path = "libs/request_handler" }
+utils = { path = "libs/utils" }
 
