@@ -155,3 +155,17 @@ fn test_server_dbg_long_response() {
         "Server long request duration was not 5 sec, {duration} instead"
     );
 }
+
+#[test]
+fn test_server_multithreaded() {
+    let mut handles = vec![];
+    for _ in 0..2 {
+        handles.push(thread::spawn(|| {
+            test_server_dbg_long_response();
+        }));
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
