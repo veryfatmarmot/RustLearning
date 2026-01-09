@@ -68,8 +68,9 @@ fn test_server_dbg_long_response() {
     let start_time = time::Instant::now();
 
     let response = test_request(7882, "GET /dbg_long_5s HTTP/1.1\r\nHost: localhost\r\n\r\n");
-    assert!(response.starts_with("HTTP/1.1 404 NOT FOUND"));
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("Content-Type: text/html"));
+    assert!(response.contains("Test OK"));
 
     let duration = (time::Instant::now() - start_time).as_secs();
     assert!(

@@ -17,7 +17,7 @@ pub fn path_to_absolute(path: &Path) -> PathBuf {
 }
 
 /// produces a proper path from the project root
-pub fn path_from_root(relative_path: &'static str) -> PathBuf {
+pub fn path_from_root(relative_path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
