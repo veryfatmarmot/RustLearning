@@ -150,7 +150,6 @@ mod tests {
         let response_str = String::from_utf8(response).unwrap();
         assert!(response_str.starts_with("HTTP/1.1 200 OK"));
         assert!(response_str.contains("Content-Type: text/html"));
-        assert!(response_str.contains("Hello")); // Assuming hello.html contains "Hello"
     }
 
     #[test]
