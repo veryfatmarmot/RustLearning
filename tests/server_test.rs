@@ -144,15 +144,23 @@ fn test_server_not_found() {
 #[test]
 fn test_server_dbg_long_response() {
     let start_time = time::Instant::now();
+    const EXPECTED_DURATION_SECS: u64 = 2;
 
-    let response = test_request("GET /dbg_long_5s HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let response = test_request(
+        format!(
+            "GET /dbg_long_{}s HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            EXPECTED_DURATION_SECS
+        )
+        .as_str(),
+    );
     assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("Content-Type: text/html"));
 
     let duration = (time::Instant::now() - start_time).as_secs();
     assert!(
-        duration >= 5 && duration < 6,
-        "Server long request duration was not 5 sec, {duration} instead"
+        duration >= EXPECTED_DURATION_SECS && duration < EXPECTED_DURATION_SECS + 1,
+        "Server long request duration was not {} sec, {duration} instead",
+        EXPECTED_DURATION_SECS
     );
 }
 

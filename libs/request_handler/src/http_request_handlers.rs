@@ -22,8 +22,8 @@ lazy_static! {
                 Box::new(HandlerFavicon),
             ),
             (
-                Regex::new(r"^/dbg_long_5s$").unwrap(),
-                Box::new(HandlerDbgLong::new(5)),
+                Regex::new(r"^/dbg_long_2s$").unwrap(),
+                Box::new(HandlerDbgLong::new(2)),
             ),
         ]
     };
