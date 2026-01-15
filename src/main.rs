@@ -1,23 +1,35 @@
-use anyhow::{Context, Result};
-use request_handler;
-use std::net::TcpListener;
-use utils;
+use anyhow::Context;
+use simple_http_server::run_server;
+use std::{
+    sync::{
+        Arc,
+        atomic::{self, AtomicBool},
+    },
+    thread,
+};
 
-fn main() -> Result<()> {
-    const ADDR: &str = "127.0.0.1:7877";
-    let listener =
-        TcpListener::bind(ADDR).with_context(|| format!("Failed to bind to http://{ADDR}"))?;
-    println!("Server listening on http://{ADDR}");
+fn main() -> anyhow::Result<()> {
+    let running = Arc::new(AtomicBool::new(true));
 
-    for stream in listener.incoming() {
-        let _scope_timer = utils::ScopeTimeLogger::new("handle_connection scope");
+    let should_be_running = running.clone();
+    let thread_handle = thread::Builder::new()
+        .name("the_server".to_string())
+        .spawn(move || run_server("127.0.0.1:7877", should_be_running))?;
 
-        let stream = stream.context("Failed to accept connection")?;
-
-        if let Err(e) = request_handler::handle_connection(stream) {
-            eprintln!("Connection error: {e}");
+    println!("enter 'q' to stop the server");
+    loop {
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .context("Failed to read from stdin")?;
+        if input.trim() == "q" {
+            println!("Start stopping the server...");
+            break;
         }
     }
 
-    Ok(())
+    running.store(false, atomic::Ordering::Release);
+    thread_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("Server thread panicked"))?
 }

@@ -1,7 +1,6 @@
-use request_handler;
+use anyhow;
 use std::{
     io::{Read, Write},
-    net::TcpListener,
     net::TcpStream,
     sync::{Arc, Mutex, OnceLock, Weak, atomic, atomic::AtomicBool},
     thread, time,
@@ -11,7 +10,7 @@ const HOTS_PORT: u16 = 7877;
 
 // ===============================================================================================
 struct TestHostServer {
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Result<(), anyhow::Error>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -20,7 +19,15 @@ impl TestHostServer {
         let running = Arc::new(AtomicBool::new(true));
         let should_be_running = running.clone();
 
-        let handle = thread::spawn(move || TestHostServer::run_loop(should_be_running, port));
+        let handle = thread::Builder::new()
+            .name("the_server".to_string())
+            .spawn(move || {
+                simple_http_server::run_server(
+                    format!("127.0.0.1:{port}").as_str(),
+                    should_be_running,
+                )
+            })
+            .expect("failed to spawn a server thread");
 
         eprintln!("Start requested for host server on port {}", port);
 
@@ -32,32 +39,6 @@ impl TestHostServer {
             running,
         }
     }
-
-    fn run_loop(should_be_running: Arc<AtomicBool>, port: u16) {
-        eprintln!("Starting host server on port {}", port);
-
-        let addr = format!("127.0.0.1:{}", port);
-        match TcpListener::bind(&addr) {
-            Ok(listener) => {
-                listener
-                    .set_nonblocking(true)
-                    .expect("can't set a listener non-blocking");
-
-                while should_be_running.load(atomic::Ordering::Acquire) {
-                    if let Ok((stream, _)) = listener.accept() {
-                        if let Err(e) = request_handler::handle_connection(stream) {
-                            eprintln!("Connection error: {e}");
-                        }
-                    } else {
-                        thread::sleep(time::Duration::from_millis(10));
-                    }
-                }
-
-                eprintln!("Server on port {} is stopping", port);
-            }
-            Err(e) => eprintln!("Bind failed on {}: {}", addr, e),
-        }
-    }
 }
 
 impl Drop for TestHostServer {
@@ -67,6 +48,7 @@ impl Drop for TestHostServer {
             self.running.store(false, atomic::Ordering::Release);
             let _ = h.join();
         }
+        eprintln!("Host server dropped");
     }
 }
 
@@ -168,9 +150,12 @@ fn test_server_dbg_long_response() {
 fn test_server_multithreaded() {
     let mut handles = vec![];
     for _ in 0..2 {
-        handles.push(thread::spawn(|| {
-            test_server_dbg_long_response();
-        }));
+        handles.push(
+            thread::Builder::new()
+                .name("long_response_request".to_string())
+                .spawn(|| test_server_dbg_long_response())
+                .expect("Failed to spawn thread"),
+        );
     }
 
     for handle in handles {

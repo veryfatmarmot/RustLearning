@@ -13,3 +13,8 @@ anyhow = "1.0.100"
 request_handler = { path = "libs/request_handler" }
 utils = { path = "libs/utils" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Networking_WinSock"] }
