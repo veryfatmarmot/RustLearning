@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use handling_runtime;
 use request_handler;
 use std::{
     io,
@@ -9,6 +10,8 @@ use std::{
     },
 };
 
+// ===============================================================================================
+
 pub fn run_server(addr: &str, should_be_running: Arc<AtomicBool>) -> Result<()> {
     let listener =
         TcpListener::bind(addr).with_context(|| format!("Failed to bind to http://{addr}"))?;
@@ -18,6 +21,8 @@ pub fn run_server(addr: &str, should_be_running: Arc<AtomicBool>) -> Result<()> 
         .context("can't set a listener non-blocking")?;
 
     println!("Server listening on http://{addr}");
+    
+    let handling_runtime = handling_runtime::get_runtime();
 
     while should_be_running.load(atomic::Ordering::Acquire) {
         match listener.accept() {
@@ -27,7 +32,9 @@ pub fn run_server(addr: &str, should_be_running: Arc<AtomicBool>) -> Result<()> 
                     .set_nonblocking(false)
                     .context("Failed to set stream to blocking")?;
 
-                if let Err(e) = request_handler::handle_connection(stream) {
+                if let Err(e) = handling_runtime
+                    .execute(Box::new(|| request_handler::handle_connection(stream)))
+                {
                     eprintln!("Connection handling error: {e}");
                 }
             }
