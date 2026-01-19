@@ -1,11 +1,16 @@
+mod scope_time_logger;
+pub use crate::scope_time_logger::ScopeTimeLogger;
+
+pub mod thread_pool;
+
+// =======================================================================================================
+
 use std::{
     env,
     path::{Path, PathBuf},
 };
 
-mod scope_time_logger;
-
-pub use crate::scope_time_logger::ScopeTimeLogger;
+// =======================================================================================================
 
 /// converts a path to an absolute path
 pub fn path_to_absolute(path: &Path) -> PathBuf {
