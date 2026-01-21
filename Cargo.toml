@@ -1,5 +1,5 @@
 [workspace]
-members = ["libs/request_handler", "libs/utils", "libs/handling_runtime"]
+members = ["libs/request_handler", "libs/utils"]
 
 [package]
 name = "simple_http_server"
@@ -9,10 +9,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1.49.0", features = ["full"] }
 anyhow = "1.0.100"
 request_handler = { path = "libs/request_handler" }
 utils = { path = "libs/utils" }
-handling_runtime = { path = "libs/handling_runtime", features = ["thread_pool_runtime"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

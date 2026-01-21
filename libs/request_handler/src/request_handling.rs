@@ -1,14 +1,14 @@
 mod http_request_handlers;
 
 use anyhow::{Context, Result, ensure};
-use std::{
-    io::{BufReader, prelude::*},
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 
 /// Handles a single TCP connection: reads the request, parses it, and sends a response.
-pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
-    let uri = get_uri(&stream)?;
+pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+    let uri = get_uri(&mut stream).await?;
 
     // Route to response based on URI
     let handler = http_request_handlers::HANDLES
@@ -16,7 +16,7 @@ pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
         .find(|(re, _)| re.is_match(uri.as_str()))
         .map(|(_, h)| h.as_ref())
         .unwrap_or(http_request_handlers::NOT_FOUND_HANDLER.as_ref());
-    let response = handler.handle()?;
+    let response = handler.handle().await?;
 
     // Print response for debugging
     if let Ok(_) = std::str::from_utf8(&response) {
@@ -28,33 +28,30 @@ pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
     // Return the response
     stream
         .write_all(&response)
+        .await
         .context("Failed to write response")?;
-    stream.flush().context("Failed to flush response")?;
+    stream.flush().await.context("Failed to flush response")?;
 
     Ok(())
 }
 
 /// Reads the HTTP request from the stream and extracts the URI.
-fn get_uri(stream: &TcpStream) -> Result<String> {
-    let buf_reader = BufReader::new(stream);
+async fn get_uri(stream: &mut TcpStream) -> Result<String> {
+    let mut http_request = String::new();
 
-    // Read request lines, handling I/O errors properly
-    let http_request: Vec<String> = buf_reader
-        .lines()
-        .take_while(|line| match line {
-            Ok(l) => !l.is_empty(),
-            Err(_) => false, // Stop on error
-        })
-        .collect::<Result<_, _>>()
-        .context("Failed to read request lines")?;
-
-    println!("Request: {http_request:#?}\n\n");
+    let mut buf_reader = BufReader::new(stream);
+    buf_reader
+        .read_line(&mut http_request)
+        .await
+        .context("Failed to read the first line of the request")?;
 
     // Ensure we have at least the first line
     ensure!(!http_request.is_empty(), "Invalid HTTP request: no headers");
 
+    println!("Request starts with: {http_request:#?}\n\n");
+
     // Parse the first line (e.g., "GET / HTTP/1.1")
-    let mut header_first_line_parts = http_request[0].split_whitespace();
+    let mut header_first_line_parts = http_request.split_whitespace();
     let http_method = header_first_line_parts
         .next()
         .context("Invalid first header line: missing METHOD")?;

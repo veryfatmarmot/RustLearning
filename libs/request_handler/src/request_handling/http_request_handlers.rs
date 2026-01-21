@@ -1,13 +1,16 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{boxed::Box, fs};
+use std::{boxed::Box};
+use tokio::fs;
 use utils;
 
 type Response = Vec<u8>;
 
+#[async_trait]
 pub trait Handler {
-    fn handle(&self) -> Result<Response>;
+    async fn handle(&self) -> Result<Response>;
 }
 
 type BoxedHandler = Box<dyn Handler + Send + Sync>;
@@ -30,9 +33,9 @@ lazy_static! {
 }
 
 trait HtmlResponder {
-    fn respond_with_html(&self, html_path: &str) -> Result<Response> {
+    async fn respond_with_html(&self, html_path: &str) -> Result<Response> {
         let path = utils::path_from_root(html_path);
-        let contents = match fs::read_to_string(&path) {
+        let contents = match fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
@@ -40,7 +43,7 @@ trait HtmlResponder {
                     utils::path_to_absolute(&path),
                     e
                 );
-                return NOT_FOUND_HANDLER.as_ref().handle();
+                return NOT_FOUND_HANDLER.as_ref().handle().await;
             }
         };
         let length = contents.len();
@@ -54,10 +57,12 @@ trait HtmlResponder {
 
 /// Returns a 404 Not Found response.
 struct HandlerNotFound;
+
+#[async_trait]
 impl Handler for HandlerNotFound {
-    fn handle(&self) -> Result<Response> {
+    async fn handle(&self) -> Result<Response> {
         let path = utils::path_from_root("resources/404.html");
-        let contents = match fs::read_to_string(&path) {
+        let contents = match fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
@@ -92,28 +97,34 @@ impl HandlerDbgLong {
     }
 }
 impl HtmlResponder for HandlerDbgLong {}
+
+#[async_trait]
 impl Handler for HandlerDbgLong {
-    fn handle(&self) -> Result<Response> {
+    async fn handle(&self) -> Result<Response> {
         std::thread::sleep(std::time::Duration::from_secs(self.delay as u64));
-        self.respond_with_html("resources/debug.html")
+        self.respond_with_html("resources/debug.html").await
     }
 }
 
 /// Returns the main page response
 struct HandlerHome;
 impl HtmlResponder for HandlerHome {}
+
+#[async_trait]
 impl Handler for HandlerHome {
-    fn handle(&self) -> Result<Response> {
-        self.respond_with_html("resources/hello.html")
+    async fn handle(&self) -> Result<Response> {
+        self.respond_with_html("resources/hello.html").await
     }
 }
 
 /// Returns the favicon response by reading favicon.ico.
 struct HandlerFavicon;
+
+#[async_trait]
 impl Handler for HandlerFavicon {
-    fn handle(&self) -> Result<Response> {
+    async fn handle(&self) -> Result<Response> {
         let path = utils::path_from_root("resources/favicon.ico");
-        let contents = match fs::read(&path) {
+        let contents = match fs::read(&path).await {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
@@ -121,7 +132,7 @@ impl Handler for HandlerFavicon {
                     utils::path_to_absolute(&path),
                     e
                 );
-                return NOT_FOUND_HANDLER.as_ref().handle();
+                return NOT_FOUND_HANDLER.as_ref().handle().await;
             }
         };
         let length = contents.len();
@@ -141,10 +152,10 @@ impl Handler for HandlerFavicon {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_handler_home() {
+    #[tokio::test]
+    async fn test_handler_home() {
         let handler = HandlerHome;
-        let result = handler.handle();
+        let result = handler.handle().await;
         assert!(result.is_ok());
         let response = result.unwrap();
         let response_str = String::from_utf8(response).unwrap();
@@ -152,10 +163,10 @@ mod tests {
         assert!(response_str.contains("Content-Type: text/html"));
     }
 
-    #[test]
-    fn test_handler_not_found() {
+    #[tokio::test]
+    async fn test_handler_not_found() {
         let handler = HandlerNotFound;
-        let result = handler.handle();
+        let result = handler.handle().await;
         assert!(result.is_ok());
         let response = result.unwrap();
         let response_str = String::from_utf8(response).unwrap();
@@ -163,10 +174,10 @@ mod tests {
         assert!(response_str.contains("Content-Type: text/html"));
     }
 
-    #[test]
-    fn test_handler_favicon() {
+    #[tokio::test]
+    async fn test_handler_favicon() {
         let handler = HandlerFavicon;
-        let result = handler.handle();
+        let result = handler.handle().await;
         assert!(result.is_ok());
         let response = result.unwrap();
         let response_str = String::from_utf8_lossy(&response);

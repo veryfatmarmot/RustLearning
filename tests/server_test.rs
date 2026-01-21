@@ -1,33 +1,39 @@
-use anyhow;
 use std::{
     io::{Read, Write},
     net::TcpStream,
-    sync::{Arc, Mutex, OnceLock, Weak, atomic, atomic::AtomicBool},
+    sync::{Arc, Mutex, OnceLock, Weak},
     thread, time,
 };
+use tokio;
 
 const HOTS_PORT: u16 = 7877;
 
 // ===============================================================================================
 struct TestHostServer {
-    handle: Option<thread::JoinHandle<Result<(), anyhow::Error>>>,
-    running: Arc<AtomicBool>,
+    async_runtime: Option<tokio::runtime::Runtime>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 impl TestHostServer {
     fn new(port: u16) -> Self {
-        let running = Arc::new(AtomicBool::new(true));
-        let should_be_running = running.clone();
+        let async_runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
-        let handle = thread::Builder::new()
-            .name("the_server".to_string())
-            .spawn(move || {
-                simple_http_server::run_server(
-                    format!("127.0.0.1:{port}").as_str(),
-                    should_be_running,
-                )
-            })
-            .expect("failed to spawn a server thread");
+        let addr = format!("127.0.0.1:{}", port);
+        async_runtime.spawn(async move {
+            let shutdown_handle = async move {
+                let _ = shutdown_rx.changed().await;
+            };
+
+            if let Err(e) = simple_http_server::run_server(
+                &addr,
+                shutdown_handle,
+            )
+            .await
+            {
+                eprintln!("Host server error: {}", e);
+            }
+        });
 
         eprintln!("Start requested for host server on port {}", port);
 
@@ -35,8 +41,8 @@ impl TestHostServer {
         thread::sleep(time::Duration::from_millis(100));
 
         Self {
-            handle: Some(handle),
-            running,
+            async_runtime: Some(async_runtime),
+            shutdown_tx,
         }
     }
 }
@@ -44,10 +50,18 @@ impl TestHostServer {
 impl Drop for TestHostServer {
     fn drop(&mut self) {
         eprintln!("Dropping host server");
-        if let Some(h) = self.handle.take() {
-            self.running.store(false, atomic::Ordering::Release);
-            let _ = h.join();
+
+        if let Err(e) = self.shutdown_tx.send(true) {
+            eprintln!("Failed to send shutdown signal to host server: {}", e);
         }
+
+        // Give it time to shutdown gracefully
+        thread::sleep(time::Duration::from_millis(50));
+
+        if let Some(async_runtime) = self.async_runtime.take() {
+            async_runtime.shutdown_timeout(time::Duration::from_secs(5));
+        }
+
         eprintln!("Host server dropped");
     }
 }
@@ -82,6 +96,7 @@ fn test_request(request: &str) -> String {
         let addr = format!("127.0.0.1:{}", HOTS_PORT);
         if let Ok(mut stream) = TcpStream::connect(&addr) {
             stream.write_all(request.as_bytes()).unwrap();
+            stream.flush().unwrap();
             let mut buffer = [0; 2048];
             if let Ok(n) = stream.read(&mut buffer) {
                 response = String::from_utf8_lossy(&buffer[..n]).to_string();
@@ -95,6 +110,8 @@ fn test_request(request: &str) -> String {
 }
 
 // ===============================================================================================
+
+// TODO: must be tokio async tests
 
 #[test]
 fn test_server_root() {
@@ -125,6 +142,10 @@ fn test_server_not_found() {
 
 #[test]
 fn test_server_dbg_long_response() {
+    server_dbg_long_response(None);
+}
+
+fn server_dbg_long_response(request_id: Option<u32>) {
     let start_time = time::Instant::now();
     const EXPECTED_DURATION_SECS: u64 = 2;
 
@@ -141,7 +162,8 @@ fn test_server_dbg_long_response() {
     let duration = (time::Instant::now() - start_time).as_secs();
     assert!(
         duration >= EXPECTED_DURATION_SECS && duration < EXPECTED_DURATION_SECS + 1,
-        "Server long request duration was not {} sec, {duration} instead",
+        "Server long request {}duration was not {} sec, {duration} instead",        
+        request_id.map_or(String::new(), |id| format!("#{id} ")),
         EXPECTED_DURATION_SECS
     );
 }
@@ -149,11 +171,11 @@ fn test_server_dbg_long_response() {
 #[test]
 fn test_server_multithreaded() {
     let mut handles = vec![];
-    for _ in 0..2 {
+    for id in 0..10 {
         handles.push(
             thread::Builder::new()
                 .name("long_response_request".to_string())
-                .spawn(|| test_server_dbg_long_response())
+                .spawn(move || server_dbg_long_response(Some(id)))
                 .expect("Failed to spawn thread"),
         );
     }
