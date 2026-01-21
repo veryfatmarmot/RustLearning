@@ -1,14 +1,23 @@
 mod http_request_handlers;
 
 use anyhow::{Context, Result, ensure};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 
+static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+// =================================================================================================
+
 /// Handles a single TCP connection: reads the request, parses it, and sends a response.
 pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+    let request_number = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
     let uri = get_uri(&mut stream).await?;
+
+    println!("\n#{request_number} Request: '{uri}'");
 
     // Route to response based on URI
     let handler = http_request_handlers::HANDLES
@@ -19,10 +28,10 @@ pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let response = handler.handle().await?;
 
     // Print response for debugging
-    if let Ok(_) = std::str::from_utf8(&response) {
-        println!("Response: [string data]");
+    if let Ok(utf8_response) = std::str::from_utf8(&response) {
+        println!("#{request_number} Response: '{}...'", utf8_response.lines().next().unwrap_or(""));
     } else {
-        println!("Response: [binary data]");
+        println!("#{request_number} Response: [binary data]");
     }
 
     // Return the response
@@ -47,8 +56,6 @@ async fn get_uri(stream: &mut TcpStream) -> Result<String> {
 
     // Ensure we have at least the first line
     ensure!(!http_request.is_empty(), "Invalid HTTP request: no headers");
-
-    println!("Request starts with: {http_request:#?}\n\n");
 
     // Parse the first line (e.g., "GET / HTTP/1.1")
     let mut header_first_line_parts = http_request.split_whitespace();
