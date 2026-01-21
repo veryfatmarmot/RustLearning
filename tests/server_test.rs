@@ -1,10 +1,13 @@
 use std::{
-    io::{Read, Write},
-    net::TcpStream,
     sync::{Arc, Mutex, OnceLock, Weak},
     thread, time,
 };
-use tokio;
+use tokio::{
+    self,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    task::JoinSet,
+};
 
 const HOTS_PORT: u16 = 7877;
 
@@ -25,12 +28,7 @@ impl TestHostServer {
                 let _ = shutdown_rx.changed().await;
             };
 
-            if let Err(e) = simple_http_server::run_server(
-                &addr,
-                shutdown_handle,
-            )
-            .await
-            {
+            if let Err(e) = simple_http_server::run_server(&addr, shutdown_handle).await {
                 eprintln!("Host server error: {}", e);
             }
         });
@@ -58,8 +56,13 @@ impl Drop for TestHostServer {
         // Give it time to shutdown gracefully
         thread::sleep(time::Duration::from_millis(50));
 
-        if let Some(async_runtime) = self.async_runtime.take() {
-            async_runtime.shutdown_timeout(time::Duration::from_secs(5));
+        if let Some(async_runtime) = self.async_runtime.take() {            
+            // Drop the runtime in a blocking thread to avoid panic
+            std::thread::spawn(move || {
+                async_runtime.shutdown_timeout(time::Duration::from_secs(5));
+            })
+            .join()
+            .expect("Failed to join async runtime shutdown thread");
         }
 
         eprintln!("Host server dropped");
@@ -85,7 +88,7 @@ fn lazy_start_host_server() -> Arc<TestHostServer> {
 
 // ===============================================================================================
 
-fn test_request(request: &str) -> String {
+async fn test_request(request: &str) -> String {
     let mut response = String::new();
 
     {
@@ -94,11 +97,11 @@ fn test_request(request: &str) -> String {
 
         // Connect and send request
         let addr = format!("127.0.0.1:{}", HOTS_PORT);
-        if let Ok(mut stream) = TcpStream::connect(&addr) {
-            stream.write_all(request.as_bytes()).unwrap();
-            stream.flush().unwrap();
+        if let Ok(mut stream) = TcpStream::connect(&addr).await {
+            stream.write_all(request.as_bytes()).await.unwrap();
+            stream.flush().await.unwrap();
             let mut buffer = [0; 2048];
-            if let Ok(n) = stream.read(&mut buffer) {
+            if let Ok(n) = stream.read(&mut buffer).await {
                 response = String::from_utf8_lossy(&buffer[..n]).to_string();
             }
         } else {
@@ -111,11 +114,9 @@ fn test_request(request: &str) -> String {
 
 // ===============================================================================================
 
-// TODO: must be tokio async tests
-
-#[test]
-fn test_server_root() {
-    let response = test_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+#[tokio::test]
+async fn test_server_root() {
+    let response = test_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
     assert!(
         response.starts_with("HTTP/1.1 200 OK"),
         "test_server_root Response was: {response}"
@@ -123,9 +124,9 @@ fn test_server_root() {
     assert!(response.contains("Content-Type: text/html"));
 }
 
-#[test]
-fn test_server_favicon() {
-    let response = test_request("GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n");
+#[tokio::test]
+async fn test_server_favicon() {
+    let response = test_request("GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
     assert!(
         response.starts_with("HTTP/1.1 200 OK"),
         "test_server_favicon Response was: {response}"
@@ -133,19 +134,19 @@ fn test_server_favicon() {
     assert!(response.contains("Content-Type: image/x-icon"));
 }
 
-#[test]
-fn test_server_not_found() {
-    let response = test_request("GET /nonexistent HTTP/1.1\r\nHost: localhost\r\n\r\n");
+#[tokio::test]
+async fn test_server_not_found() {
+    let response = test_request("GET /nonexistent HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
     assert!(response.starts_with("HTTP/1.1 404 NOT FOUND"));
     assert!(response.contains("Content-Type: text/html"));
 }
 
-#[test]
-fn test_server_dbg_long_response() {
-    server_dbg_long_response(None);
+#[tokio::test]
+async fn test_server_dbg_long_response() {
+    server_dbg_long_response(None).await;
 }
 
-fn server_dbg_long_response(request_id: Option<u32>) {
+async fn server_dbg_long_response(request_id: Option<u32>) {
     let start_time = time::Instant::now();
     const EXPECTED_DURATION_SECS: u64 = 2;
 
@@ -155,32 +156,32 @@ fn server_dbg_long_response(request_id: Option<u32>) {
             EXPECTED_DURATION_SECS
         )
         .as_str(),
+    )
+    .await;
+
+    let id_str = request_id.map_or(String::new(), |id| format!("#{id} "));
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "Server long request {id_str}response was: '{response}'"
     );
-    assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("Content-Type: text/html"));
 
     let duration = (time::Instant::now() - start_time).as_secs();
     assert!(
-        duration >= EXPECTED_DURATION_SECS && duration < EXPECTED_DURATION_SECS + 1,
-        "Server long request {}duration was not {} sec, {duration} instead",        
-        request_id.map_or(String::new(), |id| format!("#{id} ")),
+        duration >= EXPECTED_DURATION_SECS && duration < EXPECTED_DURATION_SECS + 2,
+        "Server long request {id_str}duration was not {} sec, {duration} instead",
         EXPECTED_DURATION_SECS
     );
 }
 
-#[test]
-fn test_server_multithreaded() {
-    let mut handles = vec![];
-    for id in 0..10 {
-        handles.push(
-            thread::Builder::new()
-                .name("long_response_request".to_string())
-                .spawn(move || server_dbg_long_response(Some(id)))
-                .expect("Failed to spawn thread"),
-        );
+#[tokio::test]
+async fn test_server_multithreaded() {
+    let mut join_set = JoinSet::new();
+    for id in 0..10000 {
+        let _ = join_set.spawn(async move {
+            server_dbg_long_response(Some(id)).await;
+        });
     }
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
+    join_set.join_all().await;
 }

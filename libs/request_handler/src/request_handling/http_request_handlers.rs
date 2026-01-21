@@ -2,8 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{boxed::Box};
-use tokio::fs;
+use std::boxed::Box;
+use tokio::{self, fs, time};
 use utils;
 
 type Response = Vec<u8>;
@@ -101,7 +101,7 @@ impl HtmlResponder for HandlerDbgLong {}
 #[async_trait]
 impl Handler for HandlerDbgLong {
     async fn handle(&self) -> Result<Response> {
-        std::thread::sleep(std::time::Duration::from_secs(self.delay as u64));
+        time::sleep(time::Duration::from_secs(self.delay as u64)).await;
         self.respond_with_html("resources/debug.html").await
     }
 }
